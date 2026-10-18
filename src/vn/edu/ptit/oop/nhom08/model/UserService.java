@@ -1,84 +1,93 @@
 package vn.edu.ptit.oop.nhom08.model;
+import vn.edu.ptit.oop.nhom08.common.Role;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import vn.edu.ptit.oop.nhom08.DBConnection;
 
-import javax.imageio.ImageIO;
-import javax.swing.*;
-import javax.swing.border.EmptyBorder;
-import javax.swing.event.ChangeListener;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
-import javax.swing.table.AbstractTableModel;
-import javax.swing.table.DefaultTableCellRenderer;
-import javax.swing.table.DefaultTableModel;
-import javax.swing.table.TableRowSorter;
-import java.awt.*;
-import java.awt.event.*;
-import java.awt.geom.AffineTransform;
-import java.awt.image.BufferedImage;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.text.NumberFormat;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
-import java.util.*;
-import java.util.List;
-import java.util.function.Consumer;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-import vn.edu.ptit.oop.nhom08.*;
-import vn.edu.ptit.oop.nhom08.common.*;
-import vn.edu.ptit.oop.nhom08.exception.*;
-import vn.edu.ptit.oop.nhom08.model.*;
-import vn.edu.ptit.oop.nhom08.repository.*;
-import vn.edu.ptit.oop.nhom08.service.*;
-import vn.edu.ptit.oop.nhom08.ui.*;
-import vn.edu.ptit.oop.nhom08.ui.dialogs.*;
-import vn.edu.ptit.oop.nhom08.ui.panels.*;
-import vn.edu.ptit.oop.nhom08.util.*;
 public class UserService {
-    private final Map<String, User> users = new HashMap<>();
     private User currentUser;
-
-    public UserService() {
-        // Tài khoản mặc định Staff / Chủ khách sạn
-        users.put("admin", new User("admin", "123456", "Quản trị viên / Chủ khách sạn", Role.STAFF, "0900000001", "001200000001"));
-        users.put("staff1", new User("staff1", "123456", "Lễ tân Nguyễn Văn A", Role.STAFF, "0900000002", "001200000002"));
-        // Tài khoản mẫu Khách hàng
-        users.put("khachhang", new User("khachhang", "123456", "Nguyễn Văn Minh", Role.CUSTOMER, "0901234567", "001204012345"));
-    }
-
+    public UserService() {}
     public boolean register(String username, String password, String fullName, String phone, String cccd) throws Exception {
         if (username == null || username.trim().isEmpty() || password == null || password.trim().isEmpty()) {
             throw new Exception("Tên đăng nhập và mật khẩu không được để trống!");
         }
-        if (users.containsKey(username.trim())) {
-            throw new Exception("Tên đăng nhập '" + username + "' đã tồn tại!");
+        // 1. Kiểm tra xem tên đăng nhập đã tồn tại trong CSDL chưa
+        String checkSql = "SELECT username FROM NguoiDung WHERE username = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmtCheck = conn.prepareStatement(checkSql)) {
+            pstmtCheck.setString(1, username.trim());
+            ResultSet rs = pstmtCheck.executeQuery();
+            if (rs.next()) {
+                throw new Exception("Tên đăng nhập '" + username + "' đã tồn tại!");
+            }
+        } catch (SQLException e) {
+            throw new Exception("Lỗi kết nối cơ sở dữ liệu: " + e.getMessage());
         }
-        User newUser = new User(username.trim(), password, fullName, Role.CUSTOMER, phone, cccd);
-        users.put(username.trim(), newUser);
-        return true;
+        // 2. Thêm tài khoản mới vào CSDL (Mặc định khi đăng ký là CUSTOMER)
+        String insertSql = "INSERT INTO NguoiDung (username, password, full_name, role, phone, cccd) VALUES (?, ?, ?, ?, ?, ?)";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmtInsert = conn.prepareStatement(insertSql)) {
+            pstmtInsert.setString(1, username.trim());
+            pstmtInsert.setString(2, password);
+            pstmtInsert.setString(3, fullName);
+            pstmtInsert.setString(4, Role.CUSTOMER.name()); // Lưu tên Enum dạng chuỗi (CUSTOMER)
+            pstmtInsert.setString(5, phone);
+            pstmtInsert.setString(6, cccd);
+            
+            int rowsAffected = pstmtInsert.executeUpdate();
+            return rowsAffected > 0;
+        } catch (SQLException e) {
+            throw new Exception("Lỗi khi đăng ký tài khoản: " + e.getMessage());
+        }
     }
-
     public User login(String username, String password, Role expectedRole) throws Exception {
         if (username == null || password == null) {
             throw new Exception("Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!");
         }
-        User u = users.get(username.trim());
-        if (u == null || !u.getPassword().equals(password)) {
-            throw new Exception("Sai tên đăng nhập hoặc mật khẩu!");
-        }
-        if (u.getRole() != expectedRole) {
-            throw new Exception("Tài khoản này không thuộc quyền truy cập '" + expectedRole.getDisplayName() + "'!");
+        String sql = "SELECT username, password, full_name, role, phone, cccd FROM NguoiDung WHERE username = ?";
+        User u = null;
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, username.trim());
+            ResultSet rs = pstmt.executeQuery();
+            if (rs.next()) {
+                String dbPassword = rs.getString("password");
+                // Kiểm tra mật khẩu
+                if (!dbPassword.equals(password)) {
+                    throw new Exception("Sai tên đăng nhập hoặc mật khẩu!");
+                }
+                // Lấy quyền (Role) từ database
+                String roleStr = rs.getString("role");
+                Role dbRole = Role.valueOf(roleStr);
+                // Kiểm tra xem có đúng quyền đăng nhập mong muốn không (Staff hay Customer)
+                if (dbRole != expectedRole) {
+                    throw new Exception("Tài khoản này không thuộc quyền truy cập '" + expectedRole.getDisplayName() + "'!");
+                }
+                // Khởi tạo đối tượng User từ dữ liệu SQL
+                u = new User(
+                    rs.getString("username"),
+                    dbPassword,
+                    rs.getString("full_name"),
+                    dbRole,
+                    rs.getString("phone"),
+                    rs.getString("cccd")
+                );
+            } else {
+                throw new Exception("Sai tên đăng nhập hoặc mật khẩu!");
+            }
+        } catch (SQLException e) {
+            throw new Exception("Lỗi kết nối cơ sở dữ liệu: " + e.getMessage());
         }
         this.currentUser = u;
         return u;
     }
+    public User getCurrentUser() { 
+        return currentUser; 
+    }
 
-    public User getCurrentUser() { return currentUser; }
-    public void logout() { currentUser = null; }
+    public void logout() { 
+        currentUser = null; 
+    }
 }
