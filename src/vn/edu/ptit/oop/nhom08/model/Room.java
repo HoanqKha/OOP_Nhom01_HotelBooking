@@ -1,4 +1,4 @@
-package model;
+package vn.edu.ptit.oop.nhom08.model;
 
 public abstract class Room {
     private String roomNumber;
