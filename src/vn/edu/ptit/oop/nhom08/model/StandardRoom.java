@@ -1,4 +1,4 @@
-package model;
+package vn.edu.ptit.oop.nhom08.model;
 
 public class StandardRoom extends Room {
     private int bedCount;
